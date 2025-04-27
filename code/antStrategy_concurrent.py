@@ -20,11 +20,17 @@ class AntStrategy_concurrent(AntStrategy):
                 'path': [],
                 'return_path': [],
                 'carrying_food': False,
-                'direction': 0  # 0 a 7, representa la dirección actual de la hormiga
-
+                'direction': 0,  # 0 a 7, representa la dirección actual de la hormiga
+                'map': [[TerrainType.COLONY]],
+                'ant_map_position': [0, 0]
             }
 
         state = self.ant_states[ant_id]
+        
+        while perception.direction != Direction.EAST:
+            return AntAction.TURN_LEFT
+        
+        self.update_map(ant_id, perception)
 
         # If colony is visible detect it
         """for pos, terrain in perception.visible_cells.items():
@@ -68,6 +74,8 @@ class AntStrategy_concurrent(AntStrategy):
             if len(state['return_path'])>0:
                 action = state['return_path'].pop()
                 self.ants_last_action[ant_id] = action
+                self.update_ant_map_position(ant_id, perception.direction,
+                                             action)
                 return action
             
                     
@@ -79,6 +87,7 @@ class AntStrategy_concurrent(AntStrategy):
             state['path'].append(action)
 
         self.ants_last_action[ant_id] = action
+        self.update_ant_map_position(ant_id, perception.direction, action)
         return action
 
 
@@ -121,4 +130,105 @@ class AntStrategy_concurrent(AntStrategy):
         else:
             return AntAction.TURN_RIGHT
 
+    def update_map(self, ant_id: int, perception: AntPerception):
+        """Updates the map of ant ant_id"""
+        for pos, terrain in perception.visible_cells.items():
+            current_map = self.ant_states[ant_id]['map']
+            ant_pos = self.ant_states[ant_id]['ant_map_position']
+            print(pos, ant_pos)
+            point_to_add = [pos[1]+ant_pos[0], pos[0]+ant_pos[1]]
+            # Extending the map if needed.
+            while point_to_add[0] < 0:
+                print("a")
+                self.add_map_row(ant_id, True)
+                point_to_add[0] += 1
+                self.ant_states[ant_id]['ant_map_position'][0] += 1
+            while point_to_add[0] >= len(current_map):
+                print("b")
+                self.add_map_row(ant_id, False)
+            while point_to_add[1] < 0:
+                self.add_map_column(ant_id, True)
+                point_to_add[1] += 1
+                self.ant_states[ant_id]['ant_map_position'][1] += 1
+            while point_to_add[1] >= len(current_map[0]):
+                self.add_map_column(ant_id, False)
+            # Updating information on the map
+            self.ant_states[ant_id]['map'][point_to_add[0]][point_to_add[1]] =\
+                terrain
+            print(terrain)
+            print("map:")
+            for row in self.ant_states[ant_id]['map']:
+                print(row)
+    
+    def add_map_row(self, ant_id: int, top: bool):
+        """Adds a row to the map of ant ant_id
 
+        Args:
+            ant_id: the id of the ant whose map we want to change
+            top: true when the row to add is at the top of the map, false
+                otherwise.
+        """
+        current_map = self.ant_states[ant_id]['map']
+        to_add = list(-1 for i in range(len(current_map[0])))
+        if top:
+            to_add = [to_add]
+            for row in current_map:
+                to_add.append(row)
+            self.ant_states[ant_id]['map'] = to_add
+        else:
+            self.ant_states[ant_id]['map'].append(to_add)
+            
+    def add_map_column(self, ant_id: int, left: bool):
+        """Adds a column to the map of ant ant_id
+
+        Args:
+            ant_id: the id of the ant whose map we want to change
+            left: true when the column to add is at the left of the map, false
+                otherwise.
+        """
+        current_map = self.ant_states[ant_id]['map']
+        if left:
+            width = len(current_map[0])
+            for i in range(len(current_map)):
+                to_add = [-1]
+                for j in range(width):
+                    to_add.append(current_map[i][j])
+                current_map[i] = to_add
+        else:
+            for i in range(len(current_map)):
+                current_map[i].append(-1)
+
+    def update_ant_map_position(self, ant_id: int, direction: Direction, action: AntAction):
+        if action == AntAction.MOVE_FORWARD:
+            initial_position = [self.ant_states[ant_id]['ant_map_position'][0], 
+                                self.ant_states[ant_id]['ant_map_position'][1]]
+            if direction == Direction.NORTH:
+                self.ant_states[ant_id]['ant_map_position'][0] -= 1
+            if direction == Direction.NORTHEAST:
+                self.ant_states[ant_id]['ant_map_position'][0] -= 1
+                self.ant_states[ant_id]['ant_map_position'][1] += 1
+            if direction == Direction.EAST:
+                self.ant_states[ant_id]['ant_map_position'][1] += 1
+            if direction == Direction.SOUTHEAST:
+                self.ant_states[ant_id]['ant_map_position'][0] += 1
+                self.ant_states[ant_id]['ant_map_position'][1] += 1
+            if direction == Direction.SOUTH:
+                self.ant_states[ant_id]['ant_map_position'][0] += 1
+            if direction == Direction.SOUTHWEST:
+                self.ant_states[ant_id]['ant_map_position'][0] += 1
+                self.ant_states[ant_id]['ant_map_position'][1] -= 1
+            if direction == Direction.WEST:
+                self.ant_states[ant_id]['ant_map_position'][1] -= 1
+            if direction == Direction.NORTHWEST:
+                self.ant_states[ant_id]['ant_map_position'][0] -= 1
+                self.ant_states[ant_id]['ant_map_position'][1] -= 1
+            new_position = [self.ant_states[ant_id]['ant_map_position'][0], 
+                            self.ant_states[ant_id]['ant_map_position'][1]]
+            # Checks if the new position is out of bounds and resets the
+            # position if needed.
+            current_map = self.ant_states[ant_id]['map']
+            if (new_position[0] < 0 or new_position[0] >= len(current_map)
+                or new_position[1] < 0 or new_position[1] >= len(current_map[0])):
+                self.ant_states[ant_id]['ant_map_position'] = initial_position
+                
+            
