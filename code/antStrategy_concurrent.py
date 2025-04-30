@@ -1,6 +1,7 @@
 from common import AntPerception, AntAction, Direction, TerrainType
 from ant import AntStrategy
 import random
+import time
 
 class AntStrategy_concurrent(AntStrategy):
     def __init__(self):
@@ -18,63 +19,80 @@ class AntStrategy_concurrent(AntStrategy):
         if ant_id not in self.ant_states:
             self.ant_states[ant_id] = {
                 'map': [[TerrainType.COLONY]],
-                'ant_map_position': [0, 0]
+                'ant_map_position': [0, 0],
+                'followed_path': []
             }
-
-        state = self.ant_states[ant_id]
         
         self.update_map(ant_id, perception)
+        
+        # Reset path if the ant bumps into a wall.
+        if (len(self.ant_states[ant_id]['followed_path']) > 0
+            and self.ant_states[ant_id]['followed_path'][0] == TerrainType.WALL):
+            self.ant_states[ant_id]['followed_path'] = []
+        if len(self.ant_states[ant_id]['followed_path']) == 0:
+            # Pick up food if standing on it.
+            if (
+                not perception.has_food
+                and (0, 0) in perception.visible_cells
+                and perception.visible_cells[(0, 0)] == TerrainType.FOOD
+                ):
+                self.ants_last_action[ant_id] = AntAction.PICK_UP_FOOD
+                return AntAction.PICK_UP_FOOD
 
-        # Priority 1: Pick up food if standing on it
-        if (
-            not perception.has_food
-            and (0, 0) in perception.visible_cells
-            and perception.visible_cells[(0, 0)] == TerrainType.FOOD
+            # Drop food if at colony and carrying food.
+            if (
+                perception.has_food
+                and (0, 0) in perception.visible_cells
+                and perception.visible_cells[(0, 0)] == TerrainType.COLONY
             ):
-            self.ants_last_action[ant_id] = AntAction.PICK_UP_FOOD
-            return AntAction.PICK_UP_FOOD
+                return AntAction.DROP_FOOD
+            
+            # Find a path to colony if carrying food.
+            if perception.has_food:
+                self.ant_states[ant_id]['followed_path'] =\
+                    self.shortest_path_to_terrain(ant_id, TerrainType.COLONY)
+            # Find a path to food some is on the map.
+            else:
+                path_to_food =\
+                    self.shortest_path_to_terrain(ant_id, TerrainType.FOOD)
+                if len(path_to_food) > 0:
+                    self.ant_states[ant_id]['followed_path'] = path_to_food
+                path_to_unknown = self.shortest_path_to_terrain(ant_id, -1)
+                if len(path_to_unknown) > 0:
+                    self.ant_states[ant_id]['followed_path'] = path_to_unknown
+                # If the map is fully explored, we find a path to a random
+                # empty spot.
+                # Could be optimized by forcing the ant to go to the edges of
+                # the map.
+                path_to_empty =\
+                    self.shortest_path_to_terrain(ant_id, TerrainType.EMPTY)
+                if len(path_to_empty) > 0:
+                    self.ant_states[ant_id]['followed_path'] = path_to_empty
+                else:
+                    return AntAction.TURN_LEFT
 
-        # Priority 2: Drop food if at colony and carrying food
-        if (
-            perception.has_food
-            and (0, 0) in perception.visible_cells
-            and perception.visible_cells[(0, 0)] == TerrainType.COLONY
-        ):
-            return AntAction.DROP_FOOD      
-                    
-        action = self._decide_movement(perception)
-
-        self.ants_last_action[ant_id] = action
+        # Follow current path.
+        action =\
+            self.move_to(ant_id,
+                        self.ant_states[ant_id]['followed_path'][0],
+                        perception)
+        if action == AntAction.MOVE_FORWARD:
+            del self.ant_states[ant_id]['followed_path'][0]
         self.update_ant_map_position(ant_id, perception.direction, action)
         return action
-
-    def _decide_movement(self, perception: AntPerception) -> AntAction:
-
-        # Random movement if there is not choice.
-        movement_choice = random.random()
-
-        if movement_choice < 0.6:
-            return AntAction.MOVE_FORWARD
-        elif movement_choice < 0.8:
-            return AntAction.TURN_LEFT
-        else:
-            return AntAction.TURN_RIGHT
 
     def update_map(self, ant_id: int, perception: AntPerception):
         """Updates the map of ant ant_id"""
         for pos, terrain in perception.visible_cells.items():
             current_map = self.ant_states[ant_id]['map']
             ant_pos = self.ant_states[ant_id]['ant_map_position']
-            print(pos, ant_pos)
             point_to_add = [pos[1]+ant_pos[0], pos[0]+ant_pos[1]]
             # Extending the map if needed.
             while point_to_add[0] < 0:
-                print("a")
                 self.add_map_row(ant_id, True)
                 point_to_add[0] += 1
                 self.ant_states[ant_id]['ant_map_position'][0] += 1
             while point_to_add[0] >= len(current_map):
-                print("b")
                 self.add_map_row(ant_id, False)
             while point_to_add[1] < 0:
                 self.add_map_column(ant_id, True)
@@ -85,10 +103,6 @@ class AntStrategy_concurrent(AntStrategy):
             # Updating information on the map
             self.ant_states[ant_id]['map'][point_to_add[0]][point_to_add[1]] =\
                 terrain
-            print(terrain)
-            print("map:")
-            for row in self.ant_states[ant_id]['map']:
-                print(row)
     
     def add_map_row(self, ant_id: int, top: bool):
         """Adds a row to the map of ant ant_id
@@ -127,38 +141,200 @@ class AntStrategy_concurrent(AntStrategy):
         else:
             for i in range(len(current_map)):
                 current_map[i].append(-1)
+    
+    def search_map(self, ant_id: int, terrain: TerrainType) -> list:
+        """Searches for terrain in map.
+
+        Args:
+            ant_id: Id of an ant.
+            terrain: The terrain we're looking for.
+        Returns:
+            Positions of all terrains like terrain.
+        """
+        terrains_position = []
+        current_map = self.ant_states[ant_id]['map']
+        for i in range(len(current_map)):
+            for j in range(len(current_map[0])):
+                if current_map[i][j] == terrain:
+                    terrains_position.append([i, j])
+        return terrains_position
+        
+    
+    def compute_step(self, initial_position: list, direction: Direction) -> list:
+        """Computes the new position after a step.
+
+        Args:
+            initial_position: The initial position.
+            direction (Direction): The direction in which the ant moves.
+        Returns:
+            The new coordinates of the ant
+        """
+        initial_position = [initial_position[0], 
+                            initial_position[1]]
+        if direction == Direction.NORTH:
+            initial_position[0] -= 1
+        if direction == Direction.NORTHEAST:
+            initial_position[0] -= 1
+            initial_position[1] += 1
+        if direction == Direction.EAST:
+            initial_position[1] += 1
+        if direction == Direction.SOUTHEAST:
+            initial_position[0] += 1
+            initial_position[1] += 1
+        if direction == Direction.SOUTH:
+            initial_position[0] += 1
+        if direction == Direction.SOUTHWEST:
+            initial_position[0] += 1
+            initial_position[1] -= 1
+        if direction == Direction.WEST:
+            initial_position[1] -= 1
+        if direction == Direction.NORTHWEST:
+            initial_position[0] -= 1
+            initial_position[1] -= 1
+        return initial_position
+    def move_to(self, ant_id: int, position: list,
+                perception: AntPerception) -> AntAction:
+        """Returns an action of ant ant_id to move to position.
+
+        Args:
+            ant_id: The id of an ant.
+            position: The position the ants moves to. Must be next to the
+                current position of ant ant_id.
+            perception: Perception of ant ant_id.
+
+        Returns:
+            An action of the ant to move to or orients itself towards position.
+        """
+        current_position = self.ant_states[ant_id]['ant_map_position']
+        if (tuple(self.compute_step(current_position, perception.direction))
+            == tuple(position)):
+            return AntAction.MOVE_FORWARD
+        # We could optimize this part by choosing the shortest turn.
+        else:
+            return AntAction.TURN_LEFT
+    
+    def is_position_out_of_bounds(self, ant_id: int, position: list) -> bool:
+        current_map = self.ant_states[ant_id]['map']
+        return (position[0] < 0 or position[0] >= len(current_map)
+                or position[1] < 0 or position[1] >= len(current_map[0]))
 
     def update_ant_map_position(self, ant_id: int, direction: Direction, action: AntAction):
         if action == AntAction.MOVE_FORWARD:
-            initial_position = [self.ant_states[ant_id]['ant_map_position'][0], 
-                                self.ant_states[ant_id]['ant_map_position'][1]]
-            if direction == Direction.NORTH:
-                self.ant_states[ant_id]['ant_map_position'][0] -= 1
-            if direction == Direction.NORTHEAST:
-                self.ant_states[ant_id]['ant_map_position'][0] -= 1
-                self.ant_states[ant_id]['ant_map_position'][1] += 1
-            if direction == Direction.EAST:
-                self.ant_states[ant_id]['ant_map_position'][1] += 1
-            if direction == Direction.SOUTHEAST:
-                self.ant_states[ant_id]['ant_map_position'][0] += 1
-                self.ant_states[ant_id]['ant_map_position'][1] += 1
-            if direction == Direction.SOUTH:
-                self.ant_states[ant_id]['ant_map_position'][0] += 1
-            if direction == Direction.SOUTHWEST:
-                self.ant_states[ant_id]['ant_map_position'][0] += 1
-                self.ant_states[ant_id]['ant_map_position'][1] -= 1
-            if direction == Direction.WEST:
-                self.ant_states[ant_id]['ant_map_position'][1] -= 1
-            if direction == Direction.NORTHWEST:
-                self.ant_states[ant_id]['ant_map_position'][0] -= 1
-                self.ant_states[ant_id]['ant_map_position'][1] -= 1
-            new_position = [self.ant_states[ant_id]['ant_map_position'][0], 
-                            self.ant_states[ant_id]['ant_map_position'][1]]
-            # Checks if the new position is out of bounds and resets the
-            # position if needed.
-            current_map = self.ant_states[ant_id]['map']
-            if (new_position[0] < 0 or new_position[0] >= len(current_map)
-                or new_position[1] < 0 or new_position[1] >= len(current_map[0])):
-                self.ant_states[ant_id]['ant_map_position'] = initial_position
+            new_position =\
+                self.compute_step(self.ant_states[ant_id]['ant_map_position'],
+                                  direction)
+            if (not self.is_position_out_of_bounds(ant_id, new_position)):
+                self.ant_states[ant_id]['ant_map_position'] = new_position
+    
+    def shortest_path(self, ant_id: int, start_position: list,
+                      end_position: list) -> list:
+        """Returns the shortest know path between two positions for ant ant_id.
+
+        Args:
+            ant_id: The id of the ant.
+            start_position: The starting position of the path.
+            end_position: The end position of the path.
+        Returns:
+            list: A sequence of positions adjacent to each other (diagonally or
+                vertically) from start_position to end_position.
+        """
+        class Tile:
+            def __init__(self, position: tuple,
+                         strategy: AntStrategy_concurrent,
+                         parent):
+                self.position = position
+                self.strategy = strategy
+                self.parent = parent
+            def __str__(self):
+                return str(self.position)
+            def get_neighbours(self, ant_id: int):
+                """Get neighouring tiles.
+                Args:
+                    ant_id: The id of an ant.
+                """
+                current_map = self.strategy.ant_states[ant_id]['map']
+                neighbours = []
+                directions = [Direction.NORTH, Direction.NORTHEAST,
+                              Direction.EAST, Direction.SOUTHEAST,
+                              Direction.SOUTH, Direction.SOUTHWEST,
+                              Direction.WEST, Direction.NORTHWEST]
+                for direction in directions:
+                    neighbour_position =\
+                        self.strategy.compute_step(self.position, direction)
+                    if (not self.strategy.is_position_out_of_bounds(
+                            ant_id,
+                            neighbour_position)
+                        and (current_map[neighbour_position[0]][neighbour_position[1]])
+                            != TerrainType.WALL):
+                        new_neighbour = \
+                            Tile(tuple(neighbour_position), self.strategy, self)
+                        neighbours.append(new_neighbour)
+                return neighbours
+            def path_to_origin(self):
+                path = [self.position]
+                current = self
+                while current.parent != None:
+                    current = current.parent
+                    path.append(current.position)
+                return path
+        
+        class PriorityQueue:
+            def __init__(self):
+                self.queue = {}
+                self.length = 0
+            def __str__(self):
+                return str(self.queue)
+            def push(self, index: int, item):
+                """Pushes an item into the queue."""
+                if not index in self.queue.keys():
+                    self.queue[index] = set()
+                self.queue[index].add(item)
+                self.length += 1
+            def pop(self):
+                """Pops the item with the smallest index."""
+                smallest_index = min(self.queue.keys())
+                popped = self.queue[smallest_index].pop()
+                self.length -= 1
+                if len(self.queue[smallest_index]) == 0:
+                    del self.queue[smallest_index]
+                return smallest_index, popped
+
+        starting_tile = Tile(tuple(start_position), self, None)
+        frontier = PriorityQueue()
+        frontier.push(0, starting_tile)
+        explored_positions = set()
+        
+        while frontier.length > 0:
+            current_tile_distance, current_tile = frontier.pop()
+            if current_tile.position == tuple(end_position):
+                return list(reversed(current_tile.path_to_origin()))
+            for neighbour in current_tile.get_neighbours(ant_id):
+                if neighbour.position not in explored_positions:
+                    explored_positions.add(neighbour.position)
+                    frontier.push(current_tile_distance + 1, neighbour)
+        raise Exception('Frontier exhausted')
+    def shortest_path_to_terrain(self, ant_id: int, terrain_type: int) -> list:
+        """Computes the shortest path to a specific terrain type.
+
+        Args:
+            ant_id: The id of an ant.
+            terrain_type: The terrain for which the shortest path has to be
+                computed.
+                Can be a TerrainType or -1.
+        
+        Returns:
+            The shortest path to a random tile of type terrain_type if there
+            is one, an empty list otherwise.
+        """
+        terrain_positions = self.search_map(ant_id, terrain_type)
+        if len(terrain_positions) == 0: return []
+        terrain_position = \
+            random.choice(terrain_positions)
+        current_position = self.ant_states[ant_id]['ant_map_position']
+        path_to_terrain =\
+            self.shortest_path(ant_id, current_position, terrain_position)
+        # We don't need the current position in the path.
+        del path_to_terrain[0]
+        return path_to_terrain
                 
             
