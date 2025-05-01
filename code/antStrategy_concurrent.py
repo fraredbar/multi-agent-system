@@ -66,18 +66,10 @@ class AntStrategy_concurrent(AntStrategy):
                                                   perception)
                 path_to_unknown =\
                     self.shortest_path_to_terrain(ant_id, -1, perception)
-                path_to_corner =\
-                    self.shortest_path_to_corner(ant_id, perception)
                 if len(path_to_food) > 0:
                     self.ant_states[ant_id]['followed_path'] = path_to_food
                 elif len(path_to_unknown) > 0:
                     self.ant_states[ant_id]['followed_path'] = path_to_unknown
-                # If the map is fully explored, we find a path to a random
-                # empty spot.
-                # Could be optimized by forcing the ant to go to the edges of
-                # the map.
-                elif len(path_to_corner) > 0:
-                    self.ant_states[ant_id]['followed_path'] = path_to_corner
                 else:
                     return AntAction.TURN_LEFT
         # Follow current path.
