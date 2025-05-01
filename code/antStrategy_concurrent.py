@@ -64,10 +64,10 @@ class AntStrategy_concurrent(AntStrategy):
                 # empty spot.
                 # Could be optimized by forcing the ant to go to the edges of
                 # the map.
-                path_to_empty =\
-                    self.shortest_path_to_terrain(ant_id, TerrainType.EMPTY)
-                if len(path_to_empty) > 0:
-                    self.ant_states[ant_id]['followed_path'] = path_to_empty
+                path_to_corner =\
+                    self.shortest_path_to_corner(ant_id)
+                if len(path_to_corner) > 0:
+                    self.ant_states[ant_id]['followed_path'] = path_to_corner
                 else:
                     return AntAction.TURN_LEFT
 
@@ -323,8 +323,8 @@ class AntStrategy_concurrent(AntStrategy):
                 Can be a TerrainType or -1.
         
         Returns:
-            The shortest path to a random tile of type terrain_type if there
-            is one, an empty list otherwise.
+            A list of positions representing the shortest path to a random tile
+            of type terrain_type if there is one, an empty list otherwise.
         """
         terrain_positions = self.search_map(ant_id, terrain_type)
         if len(terrain_positions) == 0: return []
@@ -336,5 +336,25 @@ class AntStrategy_concurrent(AntStrategy):
         # We don't need the current position in the path.
         del path_to_terrain[0]
         return path_to_terrain
+    
+    def shortest_path_to_corner(self, ant_id: int) -> list:
+        """Computes shortest path to a random corner of the map.
+
+        Args:
+            ant_id: The id of an ant.
+
+        Returns:
+            A list of positions representing the shortest path to a random
+            corner of the map.
+        """
+        current_map = self.ant_states[ant_id]['map']
+        corners = [[0, 0], [0, len(current_map[0])-1], [len(current_map)-1, 0],
+                   [len(current_map)-1, len(current_map[0])-1]]
+        corner = random.choice(corners)
+        path = self.shortest_path(ant_id, 
+                                  self.ant_states[ant_id]['ant_map_position'],
+                                  corner)
+        del path[0]
+        return path
                 
             
