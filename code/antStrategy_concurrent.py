@@ -163,7 +163,35 @@ class AntStrategy_concurrent(AntStrategy):
                 if current_map[i][j] == terrain:
                     terrains_position.append([i, j])
         return terrains_position
-        
+
+    def search_map_edge(self, ant_id: int, terrain: TerrainType) -> list:
+        """Searches for terrain in the edge of the map.
+
+        Args:
+            ant_id: Id of an ant.
+            terrain: The terrain we're looking for.
+        Returns:
+            Positions of all terrains like terrain.
+        """
+        terrains_position = []
+        current_map = self.ant_states[ant_id]['map']
+        i = 0
+        for j in range(len(current_map[0])):
+            if current_map[i][j] == terrain:
+                terrains_position.append([i, j])
+        i = len(current_map) - 1
+        for j in range(len(current_map[0])):
+            if current_map[i][j] == terrain:
+                terrains_position.append([i, j])
+        j = 0
+        for i in range(len(current_map)):
+            if current_map[i][j] == terrain:
+                terrains_position.append([i, j])
+        j = len(current_map[0]) - 1
+        for i in range(len(current_map)):
+            if current_map[i][j] == terrain:
+                terrains_position.append([i, j])
+        return terrains_position     
     
     def compute_step(self, initial_position: list, direction: Direction) -> list:
         """Computes the new position after a step.
@@ -321,10 +349,13 @@ class AntStrategy_concurrent(AntStrategy):
         starting_state =\
             AntState(tuple(start_position), start_direction, self, None, None)
         frontier = PriorityQueue()
-        frontier.push(0, starting_state)
+        frontier.push(distance_to(start_position, end_position),
+                      starting_state)
         explored_positions = set()
         while frontier.length > 0:
             current_state_distance, current_state = frontier.pop()
+            current_state_distance -=\
+                distance_to(current_state.position, end_position)
             if current_state.position == tuple(end_position):
                 return list(reversed(current_state.path_to_origin()))
             for neighbour in current_state.get_neighbours(ant_id):
@@ -332,7 +363,10 @@ class AntStrategy_concurrent(AntStrategy):
                     not in explored_positions):
                     explored_positions.add((neighbour.position,
                                             neighbour.direction))
-                    frontier.push(current_state_distance + 1, neighbour)
+                    new_distance =\
+                        current_state_distance + 1\
+                        + distance_to(neighbour.position, end_position)
+                    frontier.push(new_distance, neighbour)
         raise Exception('Frontier exhausted')
     def shortest_path_to_terrain(
         self, ant_id: int, terrain_type: int,
@@ -350,7 +384,11 @@ class AntStrategy_concurrent(AntStrategy):
             A list of actions representing the shortest path to a random tile
             of type terrain_type if there is one, an empty list otherwise.
         """
-        terrain_positions = self.search_map(ant_id, terrain_type)
+        terrain_positions = []
+        if terrain_type == -1:
+            terrain_positions = self.search_map_edge(ant_id, terrain_type)
+        if len(terrain_positions) == 0:
+            terrain_positions = self.search_map(ant_id, terrain_type)
         if len(terrain_positions) == 0: return []
         terrain_position = \
             random.choice(terrain_positions)
@@ -358,7 +396,6 @@ class AntStrategy_concurrent(AntStrategy):
         path_to_terrain =\
             self.shortest_path(ant_id, current_position, terrain_position,
                                perception.direction)
-        # We don't need the current position in the path.
         return path_to_terrain
     
     def shortest_path_to_corner(self, ant_id: int,
@@ -381,5 +418,12 @@ class AntStrategy_concurrent(AntStrategy):
                                   self.ant_states[ant_id]['ant_map_position'],
                                   corner, perception.direction)
         return path
-                
-            
+
+def distance_to(start_position, end_position):
+    diagonal_distance =\
+        min(abs(start_position[0]-end_position[0]),
+            abs(start_position[1]-end_position[1]))
+    line_distance =\
+        max(abs(start_position[0]-end_position[0])-diagonal_distance,
+            abs(start_position[1]-end_position[1])-diagonal_distance)
+    return diagonal_distance + line_distance
