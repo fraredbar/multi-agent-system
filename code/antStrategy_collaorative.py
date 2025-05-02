@@ -2,6 +2,7 @@ from common import AntPerception, AntAction, Direction, TerrainType
 from ant import AntStrategy
 import random
 import time
+import copy
 
 class AntStrategy_concurrent(AntStrategy):
     def __init__(self):
@@ -13,6 +14,7 @@ class AntStrategy_concurrent(AntStrategy):
         ant_id = perception.ant_id
         last_action = self.ants_last_action.get(ant_id, None)
         followed_path = self.ants_followed_path.get(ant_id, [])
+        local_map = get_local_map(perception)
 
         # Pick up food if standing on it.
         if (
@@ -89,3 +91,90 @@ class AntStrategy_concurrent(AntStrategy):
         #     or Direction.get_delta(perception.direction) == TerrainType.WALL):
         #     return random.choice((AntAction.TURN_LEFT, AntAction.TURN_RIGHT))
         # return AntAction.MOVE_FORWARD
+    
+def get_local_map(perception: AntPerception) -> list:
+    """Creates a map of nearby tiles according to perception.
+
+    Args:
+        perception: Perception of the ant whose local map we want to make.
+    """
+    current_map = [[perception.visible_cells[(0, 0)]]]
+    ant_position = [0, 0]
+    for position, terrain in perception.visible_cells.items():
+        point_to_add =\
+            [position[1]+ant_position[0], position[0]+ant_position[1]]
+        # Extending the map if needed.
+        while point_to_add[0] < 0:
+            current_map = add_array_row(current_map, True, -1)
+            point_to_add[0] += 1
+            ant_position[0] += 1
+        while point_to_add[0] >= len(current_map):
+            current_map = add_array_row(current_map, False, -1)
+        while point_to_add[1] < 0:
+            current_map = add_array_column(current_map, True, -1)
+            point_to_add[1] += 1
+            ant_position[1] += 1
+        while point_to_add[1] >= len(current_map[0]):
+            current_map = add_array_column(current_map, False, -1)
+        current_map[point_to_add[0]][point_to_add[1]] = terrain
+    return current_map
+
+def is_index_out_of_bounds(index: list, array: list) -> bool:
+    """Checks index is in array.
+
+    Args:
+        index: A size 2 list.
+        array: A 2 dimensional list.
+
+    Returns:
+        bool: True if index is out of bounds for array, false otherwise.
+    """
+    return (index[0] < 0 or index[0] >= len(array)
+            or index[1] < 0 or index[1] >= len(array[0]))
+
+def add_array_row(array: list, top: bool, filler) -> list:
+    """Adds a row to the array.
+
+    Args:
+        array: A 2 dimensional list.
+        top: true when the row is to be added at the top of the array, false
+            otherwise.
+        filler: What to put in the newly created row.
+    
+    Returns:
+        A 2 dimensional list with a new row.
+    """
+    array = copy.deepcopy(array)
+    to_add = list(filler for i in range(len(array[0])))
+    if top:
+        returned = [to_add] # Make to_add a 2 dimensional array.
+        for row in array:
+            returned.append(row)
+        return returned
+    array.append(to_add)
+    return array
+
+def add_array_column(array: list, left: bool, filler) -> list:
+    """Adds a column to the array.
+
+    Args:
+        array: A 2 dimensional list.
+        left: true when the column is to be added at the left of the array,
+            false otherwise.
+        filler: What to put in the newly created column.
+
+    Returns:
+        A 2 dimensional list with a new column.
+    """
+    array = copy.deepcopy(array)
+    if left:
+        width = len(array[0])
+        for i in range(len(array)):
+            to_add = [filler]
+            for j in range(width):
+                to_add.append(array[i][j])
+            array[i] = to_add
+        return array
+    for i in range(len(array)):
+        array[i].append(filler)
+    return array
