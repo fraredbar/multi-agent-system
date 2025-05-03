@@ -52,7 +52,7 @@ class AntStrategy_collaborative(AntStrategy):
             # Find a pheromone path to food.
             elif (not perception.has_food 
                   and len(perception.food_pheromone) > 0
-                  and max(perception.food_pheromone.values()) > 50):
+                  and max(perception.food_pheromone.values()) > 70):
                 self.following_food_hormone_path_counter[ant_id] = 8
                 self.ants_followed_path[ant_id] =\
                     food_pheromone_path(local_map, local_position, perception)
@@ -354,10 +354,8 @@ def home_pheromone_path(current_map: list, position: list,
         max(list(perception.home_pheromone.items()),
             key=lambda item: item[1])[0]
     destination = list((destination[1], destination[0]))
-    if destination[0] < 0:
-        destination[0] += position[0]
-    if destination[1] < 0:
-        destination[1] += position[1]
+    destination[0] += position[0]
+    destination[1] += position[1]
     return shortest_path(current_map, position, destination,
                          perception.direction)
 
@@ -381,10 +379,8 @@ def food_pheromone_path(current_map: list, position: list,
     if destination in neighbours_position:
         return [AntAction.TURN_LEFT]
     destination = list((destination[1], destination[0]))
-    if destination[0] < 0:
-        destination[0] += position[0]
-    if destination[1] < 0:
-        destination[1] += position[1]
+    destination[0] += position[0]
+    destination[1] += position[1]
     return shortest_path(current_map, position, destination,
                          perception.direction)
 
