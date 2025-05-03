@@ -10,13 +10,16 @@ class AntStrategy_collaborative(AntStrategy):
         self.ants_followed_path = {}
         # Amount of actions since the last time the ant followed a path of
         # food pheromones.
-        self.following_food_hormone_path_counter = {}
+        self.following_food_pheromone_path_counter = {}
+        self.last_seen_home_pheromone_amount = {}
 
     def decide_action(self, perception: AntPerception) -> AntAction:
         # Get ant's ID to track its actions
         ant_id = perception.ant_id
         last_action = self.ants_last_action.get(ant_id, None)
         local_map, local_position = get_local_map(perception)
+        pheromone_free_tiles_seen =\
+            list(perception.home_pheromone.values()).count(0)
 
         if len(self.ants_followed_path.get(ant_id, [])) == 0:
             # Pick up food if standing on it.
@@ -36,6 +39,8 @@ class AntStrategy_collaborative(AntStrategy):
             ):
                 self.ants_last_action[ant_id] = AntAction.DROP_FOOD
                 return AntAction.DROP_FOOD
+
+            # Finding paths if possible.
             if perception.has_food and perception.can_see_colony():
                 self.ants_followed_path[ant_id] =\
                     path_to_terrain(local_map, local_position,
@@ -49,13 +54,17 @@ class AntStrategy_collaborative(AntStrategy):
                   and max(perception.home_pheromone.values()) > 0):
                 self.ants_followed_path[ant_id] =\
                     home_pheromone_path(local_map, local_position, perception)
-            # Find a pheromone path to food.
+            # Find a recent enough pheromone path to food.
             elif (not perception.has_food 
                   and len(perception.food_pheromone) > 0
                   and max(perception.food_pheromone.values()) > 70):
-                self.following_food_hormone_path_counter[ant_id] = 8
+                self.following_food_pheromone_path_counter[ant_id] = 8
                 self.ants_followed_path[ant_id] =\
                     food_pheromone_path(local_map, local_position, perception)
+            elif not perception.has_food and pheromone_free_tiles_seen > 0:
+                self.ants_followed_path[ant_id] =\
+                    path_to_home_pheromone_free(local_map, local_position,
+                                                perception)
         
         # Alternate between movement and dropping pheromones
         # If last action was not a pheromone drop, drop pheromone
@@ -69,23 +78,28 @@ class AntStrategy_collaborative(AntStrategy):
             else:
                 self.ants_last_action[ant_id] = AntAction.DEPOSIT_HOME_PHEROMONE
                 return AntAction.DEPOSIT_HOME_PHEROMONE
-        # If following path, follows path.
+
+        # If following a path, follows path.
         if len(self.ants_followed_path.get(ant_id, [])) > 0:
             action = self.ants_followed_path[ant_id][0]
             del self.ants_followed_path[ant_id][0]
             self.ants_last_action[ant_id] = action
             return action
         
-        if self.following_food_hormone_path_counter.get(ant_id, 0) > 0:
-            self.following_food_hormone_path_counter[ant_id] -= 1
+        # If the ant recently followed a food hormone path but can't find
+        # the rest of it, it turns around looking for it.
+        # This is to avoid leaving the path it is following.
+        if self.following_food_pheromone_path_counter.get(ant_id, 0) > 0:
+            self.following_food_pheromone_path_counter[ant_id] -= 1
             self.ants_last_action[ant_id] = AntAction.TURN_LEFT
             return AntAction.TURN_RIGHT
-
-        action = self._decide_movement(perception)
+        
+        
+        action = self.random_movement()
         self.ants_last_action[ant_id] = action
         return action
 
-    def _decide_movement(self, perception: AntPerception) -> AntAction:
+    def random_movement(self) -> AntAction:
         """Decide which direction to move based on current state"""
 
         # Random movement if no specific goal
@@ -97,13 +111,6 @@ class AntStrategy_collaborative(AntStrategy):
             return AntAction.TURN_LEFT
         else:  # 20% chance to turn right
             return AntAction.TURN_RIGHT
-        
-        # # If the ant bumps into a wall, turn randomly.
-        # if ((Direction.get_delta(perception.direction)
-        #      not in perception.visible_cells)
-        #     or Direction.get_delta(perception.direction) == TerrainType.WALL):
-        #     return random.choice((AntAction.TURN_LEFT, AntAction.TURN_RIGHT))
-        # return AntAction.MOVE_FORWARD
     
 def get_local_map(perception: AntPerception) -> tuple:
     """Creates a map of nearby tiles according to perception.
@@ -340,15 +347,15 @@ def shortest_path(current_map: list, start_position: list, end_position: list,
 
 def home_pheromone_path(current_map: list, position: list,
                         perception: AntPerception) -> list:
-    """Computes a path to the oldest home pheromone in perception.
+    """Computes a path to the most intense home pheromone in perception.
 
     Args:
         current_map: A 2 dimensional array representing a terrain map.
         position: The position of the ant in current_map.
-        perception: The perfood_pheromone_pathception of an ant.
+        perception: The perception of an ant.
 
     Returns:
-        The shortest path to the oldest home pheromone detected.
+        The shortest path to the most intense home pheromone detected.
     """
     destination =\
         max(list(perception.home_pheromone.items()),
@@ -361,14 +368,15 @@ def home_pheromone_path(current_map: list, position: list,
 
 def food_pheromone_path(current_map: list, position: list,
                         perception: AntPerception) -> list:
-    """Computes a path to the oldest food pheromone in perception.
+    """Computes a path to the most intense food pheromone in perception.
 
     Args:
         current_map: A 2 dimensional array representing a terrain map.
+        position: The position of the ant in current_map.
         perception: The perception of an ant.
 
     Returns:
-        The shortest path to the oldest food pheromone detected.
+        The shortest path to the most intense food pheromone detected.
     """
     destination =\
         max(list(perception.food_pheromone.items()),
@@ -376,6 +384,7 @@ def food_pheromone_path(current_map: list, position: list,
     neighbours_position =\
         [(0, -1), (1, -1), (1, 0), (1, 1), (0, 1), (-1, 1), (-1, 0), (-1, -1)]
     # If following the path in the wrong direction.
+    # The most intense pheromone should not be next to the ant.
     if destination in neighbours_position:
         return [AntAction.TURN_LEFT]
     destination = list((destination[1], destination[0]))
@@ -383,6 +392,29 @@ def food_pheromone_path(current_map: list, position: list,
     destination[1] += position[1]
     return shortest_path(current_map, position, destination,
                          perception.direction)
+
+def path_to_home_pheromone_free(current_map: list, position: list,
+                           perception: AntPerception) -> list:
+    """Computes a path to a random tile with no home pheromones.
+
+    Args:
+        current_map: A 2 dimensional array representing a terrain map.
+        position: The position of the ant in current_map.
+        perception: The perception of an ant.
+
+    Returns:
+        The shortest path to a random tile with no home pheromones detected.
+    """
+    pheromone_free_positions = []
+    for tile_position, tile_pheromone_level in perception.home_pheromone.items():
+        if tile_pheromone_level == 0:
+            pheromone_free_positions.append(tile_position)
+    destination = random.choice(pheromone_free_positions)
+    destination = list((destination[1], destination[0]))
+    destination[0] += position[0]
+    destination[1] += position[1]
+    return shortest_path(current_map, position, destination,
+                         perception.direction)    
 
 def path_to_terrain(current_map: list, position: list,
                     terrain_type: TerrainType,
