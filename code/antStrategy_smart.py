@@ -25,7 +25,6 @@ class AntStrategy_concurrent(AntStrategy):
             }
         
         self.update_map(ant_id, perception)
-        self.update_pheromone_map(ant_id, perception)
         
         # Reset path if the ant bumps into a wall.
         if (len(self.ant_states[ant_id]['followed_path']) > 0
@@ -71,6 +70,11 @@ class AntStrategy_concurrent(AntStrategy):
                     self.shortest_path_to_terrain(ant_id, -1, perception)
                 if len(path_to_food) > 0:
                     self.ant_states[ant_id]['followed_path'] = path_to_food
+                elif not is_position_on_the_edge(
+                    self.ant_states[ant_id]['ant_map_position'],
+                    self.ant_states[ant_id]['map']):
+                    self.ant_states[ant_id]['followed_path'] =\
+                        self.shortest_path_to_edge(ant_id, perception)
                 elif len(path_to_unknown) > 0:
                     self.ant_states[ant_id]['followed_path'] = path_to_unknown
                 else:
@@ -128,40 +132,7 @@ class AntStrategy_concurrent(AntStrategy):
             # Updating information on the map
             self.ant_states[ant_id]['map'][point_to_add[0]][point_to_add[1]] =\
                 terrain
-    
-    def update_pheromone_map(self, ant_id: int, perception: AntPerception):
-        """Updates pheomone map"""
-        for pos, pheromone_intensity in perception.home_pheromone.items():
-            self.ant_states[ant_id]['home_pheromone_map']
-            ant_pos = self.ant_states[ant_id]['ant_map_position']
-            point_to_add = [pos[1]+ant_pos[0], pos[0]+ant_pos[1]]
-            # Extending the map if needed.
-            while point_to_add[0] < 0:
-                self.ant_states[ant_id]['home_pheromone_map'] =\
-                    add_array_row(self.ant_states[ant_id]['home_pheromone_map'],
-                                  True, 0)
-                point_to_add[0] += 1
-                self.ant_states[ant_id]['ant_map_position'][0] += 1
-            while (point_to_add[0]
-                   >= len(self.ant_states[ant_id]['home_pheromone_map'])):
-                self.ant_states[ant_id]['home_pheromone_map'] =\
-                    add_array_row(self.ant_states[ant_id]['home_pheromone_map'],
-                                  False, 0)
-            while point_to_add[1] < 0:
-                self.ant_states[ant_id]['home_pheromone_map'] =\
-                    add_array_column(
-                        self.ant_states[ant_id]['home_pheromone_map'], True, 0)
-                point_to_add[1] += 1
-                self.ant_states[ant_id]['ant_map_position'][1] += 1
-            while (point_to_add[1]
-                   >= len(self.ant_states[ant_id]['home_pheromone_map'][0])):
-                self.ant_states[ant_id]['home_pheromone_map'] =\
-                    add_array_column(
-                        self.ant_states[ant_id]['home_pheromone_map'], False, 0)
-            # Updating information on the map
-            self.ant_states[ant_id]['map'][point_to_add[0]][point_to_add[1]] =\
-                pheromone_intensity
-    
+
     def search_map(self, ant_id: int, terrain: TerrainType) -> list:
         """Searches for terrain in map.
 
@@ -400,13 +371,7 @@ class AntStrategy_concurrent(AntStrategy):
             of type terrain_type if there is one, an empty list otherwise.
         """
         current_position = self.ant_states[ant_id]['ant_map_position']
-        current_map = self.ant_states[ant_id]['map']
         terrain_positions = []
-        if (terrain_type == -1
-            and not is_position_on_the_edge(current_position, current_map)):
-            terrain_positions =\
-                [min(self.search_map_edge(ant_id, terrain_type),
-                     key= lambda position: distance_to(current_position, position))]
         if len(terrain_positions) == 0:
             terrain_positions = self.search_map(ant_id, terrain_type)
         if len(terrain_positions) == 0: return []
@@ -417,26 +382,44 @@ class AntStrategy_concurrent(AntStrategy):
                                perception.direction)
         return path_to_terrain
     
-    def shortest_path_to_corner(self, ant_id: int,
-                                perception: AntPerception) -> list:
-        """Computes shortest path to a random corner of the map.
+    def shortest_path_to_edge(self, ant_id: int,
+                              perception: AntPerception) -> list:
+        """Computes shortest path to the edge while avoiding other ants.
 
         Args:
             ant_id: The id of an ant.
             perception: The perception of ant ant_id.
 
         Returns:
-            A list of actions representing the shortest path to a random
-            corner of the map.
+            A list of actions representing the shortest path to the edge of the
+            map which avoids other ants and preferring unknown tiles.
         """
-        current_map = self.ant_states[ant_id]['map']
-        corners = [[0, 0], [0, len(current_map[0])-1], [len(current_map)-1, 0],
-                   [len(current_map)-1, len(current_map[0])-1]]
-        corner = random.choice(corners)
-        path = self.shortest_path(ant_id, 
-                                  self.ant_states[ant_id]['ant_map_position'],
-                                  corner, perception.direction)
-        return path
+        current_position = self.ant_states[ant_id]['ant_map_position']
+        terrain_positions = []
+        neighbours_relative_position =\
+            [(0, -1), (1, -1), (1, 0), (1, 1), (0, 1), (-1, 1), (-1, 0), (-1, -1)]
+        closest_unknown_edge = \
+            min(self.search_map_edge(ant_id, -1),
+                key= lambda position: distance_to(current_position, position))
+        next_to_pheromones = False
+        for position in neighbours_relative_position:
+            for pheromone_position in perception.home_pheromone.keys():
+                if (perception.home_pheromone[pheromone_position] != 0.0
+                    and pheromone_position == position):
+                    next_to_pheromones = True
+        if (not next_to_pheromones):
+            terrain_positions =\
+                [min(self.search_map_edge(ant_id, -1),
+                     key= lambda position: distance_to(current_position, position))]
+        if len(terrain_positions) == 0:
+            terrain_positions = self.search_map_edge(ant_id, -1)
+        if len(terrain_positions) == 0: return []
+        terrain_position = \
+            random.choice(terrain_positions)
+        path_to_terrain =\
+            self.shortest_path(ant_id, current_position, terrain_position,
+                               perception.direction)
+        return path_to_terrain
 
 def distance_to(start_position, end_position):
     diagonal_distance =\
