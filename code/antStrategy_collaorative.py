@@ -408,11 +408,15 @@ def path_to_home_pheromone_free(current_map: list, position: list,
     pheromone_free_positions = []
     for tile_position, tile_pheromone_level in perception.home_pheromone.items():
         if tile_pheromone_level == 0:
-            pheromone_free_positions.append(tile_position)
+            tile_position = list((tile_position[1], tile_position[0]))
+            tile_position[0] += position[0]
+            tile_position[1] += position[1]
+            if (current_map[tile_position[0]][tile_position[1]]
+                != TerrainType.WALL):
+                pheromone_free_positions.append(tile_position)
+    if len(pheromone_free_positions) == 0:
+        return []
     destination = random.choice(pheromone_free_positions)
-    destination = list((destination[1], destination[0]))
-    destination[0] += position[0]
-    destination[1] += position[1]
     return shortest_path(current_map, position, destination,
                          perception.direction)    
 
