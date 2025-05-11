@@ -21,10 +21,16 @@ class AntStrategy_concurrent(AntStrategy):
                 'home_pheromone_map': [[100.0]],
                 'ant_map_position': [0, 0],
                 'followed_path': [],
-                'ants_last_action': None
+                'ants_last_action': None,
+                'following_pheromone_path_counter': 0
             }
         
         self.update_map(ant_id, perception)
+        most_intense_food_pheromone = 0
+        if len(perception.food_pheromone) > 0:
+            most_intense_food_pheromone =\
+                max(perception.food_pheromone.items(),
+                    key=lambda i: i[1])[1]
         
         # Reset path if the ant bumps into a wall.
         if (len(self.ant_states[ant_id]['followed_path']) > 0
@@ -36,6 +42,9 @@ class AntStrategy_concurrent(AntStrategy):
             if (self.ant_states[ant_id]['map'][next_position[0]][next_position[1]]
                 == TerrainType.WALL):
                 self.ant_states[ant_id]['followed_path'] = []
+        # Reset path if food pheromones found.
+        if not perception.has_food and most_intense_food_pheromone > 0:
+            self.ant_states[ant_id]['followed_path'] = []
 
         if len(self.ant_states[ant_id]['followed_path']) == 0:
             # Pick up food if standing on it.
@@ -62,25 +71,32 @@ class AntStrategy_concurrent(AntStrategy):
                     self.shortest_path_to_terrain(ant_id, TerrainType.COLONY,
                                                   perception)
             # Find a path to food some is on the map.
-            else:
-                path_to_food =\
+            elif len(self.search_map(ant_id, TerrainType.FOOD)) > 0:
+                self.ant_states[ant_id]['followed_path'] =\
                     self.shortest_path_to_terrain(ant_id, TerrainType.FOOD,
-                                                  perception)
-                path_to_unknown =\
+                                                    perception)
+            # Follow food pheromones if there are some.
+            elif (most_intense_food_pheromone > 70):
+                self.ant_states[ant_id]['following_pheromone_path_counter'] = 8
+                self.ant_states[ant_id]['followed_path'] =\
+                    self.food_pheromone_path(
+                        ant_id, self.ant_states[ant_id]['ant_map_position'],
+                        perception)
+            elif self.ant_states[ant_id]['following_pheromone_path_counter'] > 0:
+                self.ant_states[ant_id]['following_pheromone_path_counter'] -= 1
+                self.ant_states[ant_id]['followed_path'] = [AntAction.TURN_LEFT]
+            elif not is_position_on_the_edge(
+                self.ant_states[ant_id]['ant_map_position'],
+                self.ant_states[ant_id]['map']):
+                self.ant_states[ant_id]['followed_path'] =\
+                    self.shortest_path_to_edge(ant_id, perception)
+            elif len(self.search_map(ant_id, -1)) > 0:
+                self.ant_states[ant_id]['followed_path'] =\
                     self.shortest_path_to_terrain(ant_id, -1, perception)
-                if len(path_to_food) > 0:
-                    self.ant_states[ant_id]['followed_path'] = path_to_food
-                elif not is_position_on_the_edge(
-                    self.ant_states[ant_id]['ant_map_position'],
-                    self.ant_states[ant_id]['map']):
-                    self.ant_states[ant_id]['followed_path'] =\
-                        self.shortest_path_to_edge(ant_id, perception)
-                elif len(path_to_unknown) > 0:
-                    self.ant_states[ant_id]['followed_path'] = path_to_unknown
-                else:
-                    self.ant_states[ant_id]['ants_last_action'] =\
-                        AntAction.TURN_LEFT
-                    return AntAction.TURN_LEFT
+            else:
+                self.ant_states[ant_id]['ants_last_action'] =\
+                    AntAction.TURN_LEFT
+                return AntAction.TURN_LEFT
         # Alternate between movement and dropping pheromones
         # If last action was not a pheromone drop, drop pheromone
         if self.ant_states[ant_id]['ants_last_action'] not in [
@@ -151,13 +167,13 @@ class AntStrategy_concurrent(AntStrategy):
         return terrains_position
 
     def search_map_edge(self, ant_id: int, terrain: TerrainType) -> list:
-        """Searches for terrain in the edge of the map.
+        """Searches for terrain on the edge of the map.
 
         Args:
             ant_id: Id of an ant.
             terrain: The terrain we're looking for.
         Returns:
-            Positions of all terrains like terrain.
+            Positions of all terrains like terrain on the edge of the map.
         """
         terrains_position = []
         current_map = self.ant_states[ant_id]['map']
@@ -408,9 +424,14 @@ class AntStrategy_concurrent(AntStrategy):
                     and pheromone_position == position):
                     next_to_pheromones = True
         if (not next_to_pheromones):
-            terrain_positions =\
-                [min(self.search_map_edge(ant_id, -1),
-                     key= lambda position: distance_to(current_position, position))]
+            closest =\
+                min(self.search_map_edge(ant_id, -1),
+                    key= lambda position: distance_to(current_position, position))
+            closest_distance = distance_to(current_position, closest)
+            edge = self.search_map_edge(ant_id, -1)
+            for position in edge:
+                if distance_to(current_position, position) == closest_distance:
+                    terrain_positions.append(position)
         if len(terrain_positions) == 0:
             terrain_positions = self.search_map_edge(ant_id, -1)
         if len(terrain_positions) == 0: return []
@@ -420,6 +441,35 @@ class AntStrategy_concurrent(AntStrategy):
             self.shortest_path(ant_id, current_position, terrain_position,
                                perception.direction)
         return path_to_terrain
+
+    def food_pheromone_path(self, ant_id: int, position: list,
+                            perception: AntPerception) -> list:
+        """Computes a path to the most intense food pheromone in perception.
+
+        Args:
+            ant_id: The id of an ant.
+            current_map: A 2 dimensional array representing a terrain map.
+            position: The position of the ant in current_map.
+            perception: The perception of an ant.
+
+        Returns:
+            The shortest path to the most intense food pheromone detected.
+        """
+        destination =\
+            max(list(perception.food_pheromone.items()),
+                key=lambda item: item[1])[0]
+        neighbours_position =\
+            [(0, -1), (1, -1), (1, 0), (1, 1), (0, 1), (-1, 1), (-1, 0),
+             (-1, -1)]
+        # If following the path in the wrong direction.
+        # The most intense pheromone should not be next to the ant.
+        if destination in neighbours_position:
+            return [AntAction.TURN_LEFT]
+        destination = list((destination[1], destination[0]))
+        destination[0] += position[0]
+        destination[1] += position[1]
+        return self.shortest_path(ant_id, position, destination,
+                                  perception.direction)
 
 def distance_to(start_position, end_position):
     diagonal_distance =\
