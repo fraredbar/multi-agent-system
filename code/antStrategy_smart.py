@@ -369,7 +369,7 @@ class AntStrategy_concurrent(AntStrategy):
                         current_state_distance + 1\
                         + distance_to(neighbour.position, end_position)
                     frontier.push(new_distance, neighbour)
-        raise Exception('Frontier exhausted')
+        return [AntAction.NO_ACTION]
     def shortest_path_to_terrain(
         self, ant_id: int, terrain_type: int,
         perception: AntPerception) -> list:
